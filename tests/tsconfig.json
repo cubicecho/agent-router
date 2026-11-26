@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // The DOM's fetch types, as ai-router's tests had them: a test reads an answer's JSON as `any`, for the fields its
+    // own request asked for. The server keeps Node's, where it is `unknown`.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [".", "../vitest.config.ts"]
+}

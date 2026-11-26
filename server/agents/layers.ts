@@ -1,0 +1,171 @@
+import {
+  AGENT_SPEC,
+  type AgentSpec,
+  type ModelSpec,
+  type PromptMode,
+  parseSpec,
+  type ResolvedAgent,
+  resolveAgentSpec,
+  type StackedPrompt,
+  stackAppParts,
+} from '@cubicecho/agent-core/spec';
+import { MODELS_BASE_URL } from '../core/wire.ts';
+import type { Snapshot } from '../db/snapshot.ts';
+import { withRouterFetch } from '../runner/model-fetch.ts';
+import { narrowedServers } from './reach.ts';
+import type { RunRequest } from './request.ts';
+
+/**
+ * The router layer, underneath every agent: the router's own models, which the run's `fetch` answers in process.
+ * An agent with an endpoint of its own replaces it, and then calls that address directly with no key.
+ */
+export const ROUTER_LAYER: AgentSpec = Object.freeze({
+  spec: AGENT_SPEC,
+  endpoint: Object.freeze({ baseUrl: MODELS_BASE_URL }),
+});
+
+/** A run's layers resolved: the agent as the request may change it, and its prompt with the app's parts. */
+export interface ResolvedRun {
+  agent: ResolvedAgent;
+  /** The agent's parts, then the app's and `app_system`, and the app's parts `stackAppParts` dropped. */
+  prompt: StackedPrompt;
+}
+
+/** An agent's live document could not be read. The router's fault, not the app's. */
+export class UnreadableAgentError extends Error {
+  /**
+   * Builds the error.
+   *
+   * @param agentName - The agent.
+   * @param errors - What `parseSpec` said.
+   */
+  constructor(agentName: string, errors: readonly string[]) {
+    super(`Agent "${agentName}" has a live document that no longer reads: ${errors.join('; ')}`);
+    this.name = 'UnreadableAgentError';
+  }
+}
+
+/**
+ * Reads an agent's stored document as a layer.
+ *
+ * @param agentName - The agent, for the error.
+ * @param document - Its live revision's document, as stored.
+ * @returns The layer.
+ * @throws {@link UnreadableAgentError} When the document no longer parses.
+ */
+export function agentLayer(agentName: string, document: Readonly<Record<string, unknown>>): AgentSpec {
+  const parsed = parseSpec(document, { understands: [] });
+  if (parsed.spec === null) {
+    throw new UnreadableAgentError(agentName, parsed.errors);
+  }
+  return parsed.spec;
+}
+
+/**
+ * Resolves an agent on its own, over the router layer: what it is before any request changes it.
+ *
+ * @param agentName - The agent, for the error.
+ * @param document - Its live revision's document, as stored.
+ * @returns The resolved agent, whose `lockedFields` a request is held to.
+ * @throws {@link UnreadableAgentError} When the document no longer parses.
+ */
+export function resolveAgent(agentName: string, document: Readonly<Record<string, unknown>>): ResolvedAgent {
+  return resolveAgentSpec([ROUTER_LAYER, agentLayer(agentName, document)]);
+}
+
+/** One of an agent's prompt parts as its model-list entry shows it: its name, and what an app may do to it. */
+export interface PartRules {
+  name: string;
+  /** As the agent's document states it. Absent lets an app extend the part, and `[]` locks it. */
+  allowedModes?: readonly PromptMode[];
+}
+
+/**
+ * Reads what an app may do to each of an agent's prompt parts, without their text.
+ *
+ * @param agentName - The agent, for the error.
+ * @param document - Its live revision's document, as stored.
+ * @returns Its parts, in order, as resolved over the router layer.
+ * @throws {@link UnreadableAgentError} When the document no longer parses.
+ */
+export function agentPartRules(agentName: string, document: Readonly<Record<string, unknown>>): PartRules[] {
+  const { prompt } = resolveAgent(agentName, document);
+  return prompt.map(({ name, allowedModes }) => (allowedModes === undefined ? { name } : { name, allowedModes }));
+}
+
+/**
+ * Builds the request layer: the sampling settings for the main model, and a narrowing of the servers.
+ *
+ * @param request - The checked request.
+ * @param reached - The servers the run reaches before the request: the workspace's servers the agent has on there.
+ * @param snapshot - The router's servers.
+ * @returns The layer, or null when the request sets nothing.
+ *
+ * @remarks
+ * `temperature`, the ceiling and `reasoning_effort` go to the fields the format names for them, and only the rest to
+ * `extraBody`, so a request's temperature can't hide in `extraBody` and beat the real one (agent-core#222), and agent-core
+ * doesn't drop its `reasoning_effort` from there. A side task never reads
+ * `model`, so none of this reaches one.
+ */
+function requestLayer(request: RunRequest, reached: readonly string[], snapshot: Snapshot): AgentSpec | null {
+  const { temperature, maxTokens, reasoningEffort, extraBody } = request.sampling;
+  const model: ModelSpec = {
+    ...(temperature === undefined ? {} : { temperature }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(Object.keys(extraBody).length === 0 ? {} : { extraBody }),
+  };
+  const setsModel = Object.keys(model).length > 0;
+  const servers = request.servers === null ? null : narrowedServers(reached, request.servers, snapshot);
+  if (setsModel === false && servers === null) {
+    return null;
+  }
+  return {
+    spec: AGENT_SPEC,
+    ...(setsModel ? { model } : {}),
+    ...(servers === null ? {} : { tools: { servers } }),
+  };
+}
+
+/**
+ * Puts the servers an agent reaches in its workspace in place of the ones its document names. ai-router doesn't read
+ * an agent's own `tools.servers`: which servers an agent uses is the workspace's to decide.
+ *
+ * @param agent - The agent's own layer.
+ * @param reached - The servers it reaches in its workspace, by name.
+ * @returns The layer, reaching exactly those servers.
+ */
+function withWorkspaceServers(agent: AgentSpec, reached: readonly string[]): AgentSpec {
+  return { ...agent, tools: { ...agent.tools, servers: [...reached] } };
+}
+
+/**
+ * Resolves a run's layers, the router's, the agent's and the request's, and stacks the app's parts on the agent's.
+ *
+ * @param agent - The agent's own layer.
+ * @param reached - The servers the agent reaches in the run's workspace, by name. They replace the document's own.
+ * @param request - The checked request.
+ * @param snapshot - The router's servers.
+ * @returns The resolved agent, and its prompt with the app's parts.
+ *
+ * @remarks
+ * The request can narrow those servers and never add one.
+ * The request layer holds no prompt: the app's parts and system messages are stacked by agent-core's
+ * `stackAppParts`, which prefixes every name with `app_`, so an app never overwrites or deletes an agent's part, and
+ * extends or replaces one only where the part allows it. Nothing above the agent names an endpoint or a model.
+ */
+export function resolveRun(
+  agent: AgentSpec,
+  reached: readonly string[],
+  request: RunRequest,
+  snapshot: Snapshot,
+): ResolvedRun {
+  const ownLayer = withWorkspaceServers(agent, reached);
+  const fromRequest = requestLayer(request, reached, snapshot);
+  const resolved = resolveAgentSpec([ROUTER_LAYER, ownLayer, ...(fromRequest === null ? [] : [fromRequest])]);
+  const prompt = stackAppParts(resolved.prompt, request.appParts ?? [], request.systemText ?? '');
+  return { agent: resolved, prompt };
+}
+
+/** Gives a resolved agent's router-bound endpoints the run's `fetch`: the runner does it, where the loop runs. */
+export { withRouterFetch };

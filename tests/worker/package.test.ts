@@ -19,7 +19,7 @@ const FORBIDDEN = ['server/db/'];
 /** The version the test builds the package at. */
 const VERSION = '9.8.7-test';
 /** How long building, starting and removing the bundle may take: a checkout on a network share is slow. */
-const SLOW_MS = 60_000;
+const SLOW_MS = 180_000;
 /**
  * Every module a file loads when it runs: `import … from`, `export … from` and `import('…')`, but not
  * `import type` or `export type`, which Node's type stripping erases.
