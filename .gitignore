@@ -1,0 +1,11 @@
+node_modules
+dist
+# The worker package and its tarball: npm run pack:worker.
+dist-worker/
+*.tgz
+coverage/
+.env
+.env.local
+*.local
+.DS_Store
+.claude/
