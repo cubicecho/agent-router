@@ -1,0 +1,20 @@
+# Postgres alone, for `npm run dev` and `npm start` on a checkout. `npm run db:up`.
+# Its own project name and port, so it never collides with ai-router's (5440).
+name: agent-router-dev
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: agents, POSTGRES_PASSWORD: agents, POSTGRES_DB: agents }
+    ports:
+      # Loopback by default. Set DEV_BIND=0.0.0.0 when the Docker daemon is remote (`docker context ls`),
+      # because 127.0.0.1 there is the daemon host's loopback.
+      - "${DEV_BIND:-127.0.0.1}:${POSTGRES_PORT:-5441}:5432"
+    volumes: [agent_router_dev_pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agents -d agents"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  agent_router_dev_pgdata:
