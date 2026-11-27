@@ -1,4 +1,12 @@
-# Needs no secrets: the images go to GHCR only, with the built-in token.
+# Needs no secrets. The images go to GHCR with the built-in token, and the worker package goes to npm by trusted
+# publishing: the runner trades its GitHub OIDC token (`id-token: write`) for a short-lived npm credential, which npm
+# gives only to a workflow the package trusts:
+#
+#   npm trust github @cubicecho/agent-router-worker --file release.yml \
+#     --repository cubicecho/agent-router --allow-publish
+#
+# so renaming this file, or moving the publish to another workflow, revokes its access until that is run again. npm
+# can only trust a workflow for a package that exists, so the package's first version was published by hand.
 
 name: Release
 
@@ -30,6 +38,8 @@ jobs:
       issues: write
       pull-requests: write
       packages: write
+      # npm's trusted publishing, and the provenance attestation the worker package carries.
+      id-token: write
 
     steps:
       - uses: actions/checkout@v7
@@ -38,9 +48,11 @@ jobs:
           fetch-depth: 0
           # The commit CI passed, not whatever main has moved to since.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # Trusted publishing needs npm 11.5.1 or later, which Node 26 ships.
       - uses: actions/setup-node@v7
         with:
           node-version: 26
+          registry-url: https://registry.npmjs.org
       - name: Install semantic-release
         run: npm install -g semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog @semantic-release/npm @semantic-release/git @semantic-release/github
       # A dry run first: most pushes release nothing, and the image steps must not run then.
@@ -79,6 +91,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.release.outputs.version }}
         run: gh release upload "v$VERSION" cubicecho-agent-router-worker-"$VERSION".tgz --clobber
+      # The same tarball, on npm. A version already there is skipped, so publishing the images again by hand for an
+      # old version leaves npm alone. No NPM_TOKEN on purpose: one would be used whenever the OIDC exchange quietly
+      # failed, hiding a broken trust setup.
+      - name: Publish the worker package to npm
+        if: steps.release.outputs.released == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if npm view "@cubicecho/agent-router-worker@$VERSION" version > /dev/null 2>&1; then
+            echo "@cubicecho/agent-router-worker@$VERSION is on npm already."
+            exit 0
+          fi
+          npm publish ./cubicecho-agent-router-worker-"$VERSION".tgz --provenance --access public
       # The worker image is also built for arm64, for workers on a Pi; the router's stays amd64.
       - uses: docker/setup-qemu-action@v4
         if: steps.release.outputs.released == 'true'

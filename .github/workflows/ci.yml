@@ -35,7 +35,8 @@ jobs:
           fi
 
   # The worker package: it packs, installs on the oldest Node it names, and starts far enough to refuse a missing
-  # router address. The tarball is kept as the run's artifact.
+  # router address; and, as a library, a program that depends on it type-checks against its declarations and runs.
+  # The tarball is kept as the run's artifact.
   worker-package:
     runs-on: ubuntu-latest
     steps:
@@ -44,9 +45,12 @@ jobs:
         with: { node-version: 26, cache: npm }
       - run: npm ci
       - run: npm run pack:worker
+      - name: Note the TypeScript this repo checks with
+        run: echo "TYPESCRIPT=$(node -p "require('./package.json').devDependencies.typescript")" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
-      - name: It installs and starts on Node 22
+      # npm installs agent-core, the peer dependency, beside it.
+      - name: The command installs and starts on Node 22
         run: |
           npm install -g ./cubicecho-agent-router-worker-*.tgz
           if agent-router-worker > worker.log 2>&1; then
@@ -56,6 +60,18 @@ jobs:
           fi
           cat worker.log
           grep -q 'AGENT_ROUTER_URL' worker.log
+      - name: The library type-checks and runs on Node 22
+        run: |
+          CONSUMER="$RUNNER_TEMP/consumer"
+          mkdir -p "$CONSUMER"
+          cp tests/worker-consumer/* "$CONSUMER"/
+          cp cubicecho-agent-router-worker-*.tgz "$CONSUMER"/
+          cd "$CONSUMER"
+          npm init -y > /dev/null
+          npm pkg set type=module
+          npm install --no-audit --no-fund ./cubicecho-agent-router-worker-*.tgz "typescript@$TYPESCRIPT" @types/node@22
+          npx tsc -p tsconfig.json
+          node consumer.ts
       - uses: actions/upload-artifact@v4
         with:
           name: agent-router-worker

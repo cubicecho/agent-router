@@ -1,0 +1,14 @@
+{
+  // A consumer's settings, not this repo's: plain `nodenext`, and skipLibCheck off so the package's declarations are
+  // checked too.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": ["node"]
+  },
+  "files": ["consumer.ts"]
+}
