@@ -18,7 +18,7 @@ import { createWorkdirServer, WORKDIR_SERVER_NAME } from './workdir/server.ts';
 export const LOCAL_ENV_ALLOWLIST: readonly string[] = Object.freeze(['PATH', 'HOME', 'LANG', 'TERM', 'USER']);
 
 /** The worker's name, as its local servers see their client. */
-const CLIENT_NAME = 'ai-router-worker';
+const CLIENT_NAME = 'agent-router-worker';
 
 /** The rule every local server's name is checked against: the router's own name rule. */
 const serverName = nameSchema('A local server name');

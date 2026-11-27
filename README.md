@@ -92,8 +92,17 @@ gql '{"query":"mutation ($w: UUID!, $k: UUID) { setWorkspaceWorker(workspaceId: 
       "variables":{"w":"<workspace id>","k":"<worker id>"}}'
 
 # On the machine with the tools; WORKER_CONFIG names its servers ({"servers":{"name":{"command":…}}}).
-AI_ROUTER_URL=http://agent-router.lan:3100 AI_ROUTER_WORKER_KEY=aiw_… WORKER_CONFIG=./worker.json npm run worker
+AGENT_ROUTER_URL=http://agent-router.lan:3100 AGENT_ROUTER_WORKER_KEY=aiw_… WORKER_CONFIG=./worker.json npm run worker
 ```
+
+### Images
+
+A release pushes two images to GHCR, and attaches the worker package's tarball to the GitHub release:
+
+- `ghcr.io/cubicecho/agent-router`: the standalone host. `docker compose up` runs it beside its own Postgres, on port
+  3100; `.env.example` lists what it reads.
+- `ghcr.io/cubicecho/agent-router-worker` (amd64 and arm64): the worker program, with its work directories on `/work`.
+- `cubicecho-agent-router-worker-<version>.tgz`: the same worker, for `npm i -g <its URL>`.
 
 ### What the standalone host doesn't do
 

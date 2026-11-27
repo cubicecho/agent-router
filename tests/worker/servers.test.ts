@@ -31,7 +31,7 @@ describe('the local servers', () => {
       LANG: 'C.UTF-8',
       LOGNAME: 'worker',
       SHELL: '/bin/sh',
-      AI_ROUTER_WORKER_KEY: 'aiw_secret',
+      AGENT_ROUTER_WORKER_KEY: 'aiw_secret',
       SOME_TOKEN: 'leak',
     };
     servers = await startLocalServers({

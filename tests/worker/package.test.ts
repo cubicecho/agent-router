@@ -110,10 +110,10 @@ describe('the worker package', () => {
       const text = await readFile(bundle, 'utf8');
       expect(text.startsWith('#!/usr/bin/env node\n')).toBe(true);
       expect(text).toContain(JSON.stringify(VERSION));
-      expect(text).not.toContain('AI_ROUTER_WORKER_VERSION');
+      expect(text).not.toContain('AGENT_ROUTER_WORKER_VERSION');
 
       const started = run(process.execPath, [bundle], { env: { PATH: process.env.PATH ?? '' } });
-      await expect(started).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('AI_ROUTER_URL') });
+      await expect(started).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('AGENT_ROUTER_URL') });
     },
     SLOW_MS,
   );

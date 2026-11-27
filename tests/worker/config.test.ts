@@ -22,8 +22,8 @@ afterEach(async () => {
  */
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
-    AI_ROUTER_URL: 'http://router.lan:3000/',
-    AI_ROUTER_WORKER_KEY: 'aiw_abc',
+    AGENT_ROUTER_URL: 'http://router.lan:3000/',
+    AGENT_ROUTER_WORKER_KEY: 'aiw_abc',
     WORKER_ROOT: join(folder, 'work'),
     ...overrides,
   };
@@ -43,9 +43,11 @@ describe('the worker config', () => {
   });
 
   it('refuses a missing router address and a key that is not a worker key', () => {
-    expect(() => readWorkerConfig(env({ AI_ROUTER_URL: undefined }), folder)).toThrow(WorkerConfigError);
-    expect(() => readWorkerConfig(env({ AI_ROUTER_WORKER_KEY: 'air_app' }), folder)).toThrow('starts "aiw_"');
-    expect(() => readWorkerConfig(env({ AI_ROUTER_WORKER_KEY: undefined }), folder)).toThrow('AI_ROUTER_WORKER_KEY');
+    expect(() => readWorkerConfig(env({ AGENT_ROUTER_URL: undefined }), folder)).toThrow(WorkerConfigError);
+    expect(() => readWorkerConfig(env({ AGENT_ROUTER_WORKER_KEY: 'air_app' }), folder)).toThrow('starts "aiw_"');
+    expect(() => readWorkerConfig(env({ AGENT_ROUTER_WORKER_KEY: undefined }), folder)).toThrow(
+      'AGENT_ROUTER_WORKER_KEY',
+    );
   });
 
   it("reads the servers file, each command's folder relative to it", async () => {

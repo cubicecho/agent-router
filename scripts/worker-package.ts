@@ -10,9 +10,9 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 
 /** The worker package: what it is called, what it installs, and the oldest Node it runs on. */
 export const WORKER_PACKAGE = Object.freeze({
-  name: '@cubicecho/ai-router-worker',
+  name: '@cubicecho/agent-router-worker',
   /** The command its `bin` puts on the PATH. */
-  command: 'ai-router-worker',
+  command: 'agent-router-worker',
   /** The bundle, at the package's root. */
   entry: 'worker.js',
   /** agent-core's own floor. */
@@ -90,7 +90,7 @@ export async function buildWorkerPackage({ outDir, version }: WorkerPackageOptio
     external: isExternal,
     transform: {
       target: `node${WORKER_PACKAGE.node}`,
-      define: { AI_ROUTER_WORKER_VERSION: JSON.stringify(version) },
+      define: { AGENT_ROUTER_WORKER_VERSION: JSON.stringify(version) },
     },
     output: { file: bundle, format: 'esm', banner: '#!/usr/bin/env node' },
     logLevel: 'warn',
@@ -100,13 +100,13 @@ export async function buildWorkerPackage({ outDir, version }: WorkerPackageOptio
   const manifest = {
     name: WORKER_PACKAGE.name,
     version,
-    description: "ai-router's worker program: runs a workspace's agent loops on another machine.",
+    description: "agent-router's worker program: runs a workspace's agent loops on another machine.",
     license: 'MIT',
     type: 'module',
     bin: { [WORKER_PACKAGE.command]: WORKER_PACKAGE.entry },
     files: [WORKER_PACKAGE.entry, 'README.md', 'LICENSE'],
     engines: { node: `>=${WORKER_PACKAGE.node}` },
-    repository: { type: 'git', url: 'git+https://github.com/cubicecho/ai-router.git' },
+    repository: { type: 'git', url: 'git+https://github.com/cubicecho/agent-router.git' },
     dependencies: Object.fromEntries(
       await Promise.all(WORKER_PACKAGE.dependencies.map(async (name) => [name, await installedVersion(name)])),
     ),
@@ -118,12 +118,12 @@ export async function buildWorkerPackage({ outDir, version }: WorkerPackageOptio
     [
       `# ${WORKER_PACKAGE.name}`,
       '',
-      "ai-router's worker program. It dials a router with a worker key and runs the agent loops of the workspaces",
-      'that name it, with its own MCP servers beside the router\'s. See "Running a worker" in',
-      "[ai-router's README](https://github.com/cubicecho/ai-router#running-a-worker).",
+      "agent-router's worker program. It dials a router with a worker key and runs the agent loops of the workspaces",
+      'that name it, with its own MCP servers as their tools. See "Tools come from workers" in',
+      "[agent-router's README](https://github.com/cubicecho/agent-router#tools-come-from-workers).",
       '',
       '```bash',
-      `AI_ROUTER_URL=http://router.lan:3000 AI_ROUTER_WORKER_KEY=aiw_... ${WORKER_PACKAGE.command}`,
+      `AGENT_ROUTER_URL=http://agent-router.lan:3100 AGENT_ROUTER_WORKER_KEY=aiw_... ${WORKER_PACKAGE.command}`,
       '```',
       '',
       `Node ${WORKER_PACKAGE.node} or later.`,
