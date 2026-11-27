@@ -11,7 +11,11 @@ thin host that merges their finished schemas.
 
 Status (2026-11-27): **steps 1 to 4 are built.** The runner, the worker program, the tables and their migration, the
 snapshot slice, `agents/`, `workers/` and `workspaces/` behind the ports, the entry point, and the package's own
-GraphQL schema with its permissions, with their tests on a test host. Next is step 5, in ai-router.
+GraphQL schema with its permissions, with their tests on a test host.
+
+**The MVP runs on its own** (step 4b): `server/standalone/` is a minimal host, booted by `server/index.ts` (`npm start`),
+so agent-router serves `/graphql`, `/v1`, `/mcp`, `/runs` and `/workers` without ai-router. Integration with ai-router
+(step 5) comes after.
 
 ## What moved here
 
@@ -113,6 +117,11 @@ hand-written fields, and its casl permissions. A host merges the finished schema
 4. The package's own GraphQL schema: `agents/resolvers.ts`, `run-resolvers.ts`, `workers/resolvers.ts`,
    `workspaces/`, the write guards and hooks, casl permissions, and the deletes and the copy that call `lifecycle`. A
    small host in the tests stitches it with a stand-in. **Done.**
+4b. The MVP: a standalone host in this package, so it runs on its own. Its ports are as small as they can be: models
+   are providers from `AGENT_ROUTER_PROVIDERS` (no pools, usage or health); there are no router MCP servers, so tools
+   come only from workers' local servers; people are one admin, on `SECURE_LOCAL_NET` or `AGENT_ROUTER_ADMIN_TOKEN`;
+   lifecycle calls are logged no-ops. An HTTP test (`tests/standalone/`) runs an agent on `/v1`, streamed and not, and
+   on a remote worker calling a tool on its own server. **Done.**
 5. Later, in ai-router: depend on this package, delete the copies, implement the ports over its own areas, and compare
    the merged schema with today's.
 
@@ -124,3 +133,10 @@ hand-written fields, and its casl permissions. A host merges the finished schema
   in step 3: they need its tools area.
 - **drizzle-graphql warns at build** that `workspaceKeys.hash` is excluded and required. Its inserts are reserved, so
   no generated insert exists; ai-router's build says the same.
+
+## The standalone host (step 4b)
+
+`server/standalone/` is a host like any other, and the only code here that reads the environment. ai-router never
+runs it: it mounts the package and supplies its own ports. What it leaves out is ai-router's: accounts and roles,
+pools, balancing, usage, prices, provider health, router MCP servers, installs, secrets, the admin server, the UI and
+rate limiting. Its advisory lock is `agent-router`, not ai-router's, so the two never share a database by accident.

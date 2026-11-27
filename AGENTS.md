@@ -28,6 +28,8 @@ The same folders as ai-router's `server/`, so the host can switch to this packag
 | `server/workspaces/` | workspaces' keys, worker, copy and per-agent switches, as GraphQL fields | all of the above |
 | `server/graphql/` | this package's schema: building it, its abilities and permissions, write guards, database errors | everything here |
 | `server/agent-router.ts` | the entry point a host calls, and what it exports | everything |
+| `server/standalone/` | the MVP's minimal host: env config, providers as the models port, the admin as people, Postgres, `/graphql` with operation limits, the Express app | everything here; nothing in the package imports it |
+| `server/index.ts` | boot for the standalone host (`npm start`) | `standalone`, `agent-router` |
 | `worker/` | the worker program, its local servers and the `workdir` server | `server/core`, `server/runner`, `server/auth/keys`, `server/tools` |
 | `scripts/` | building the worker package | |
 | `drizzle/` | this package's migrations, committed | |
@@ -46,12 +48,19 @@ ai-router's `AGENTS.md` holds the invariants this code keeps. These are the ones
   mutation is shut until `graphql/permissions.ts` names it, and a run reaches only what `FIELD_GRANTS` lists.
 - **Everything the host owns comes through `server/ports.ts`.** The snapshot takes the host's view on every rebuild;
   never read a host table.
+- **Only `server/standalone/` reads the environment.** The package takes everything from its host; the standalone
+  host is one, and nothing outside it imports it.
+- **The standalone host has no router MCP servers.** Its tools port refuses every call; a run gets tools only from its
+  worker's local servers.
 - **Admin roles are this package's own** (`server/core/admin-roles.ts`). A run's caller carries every package's roles,
   and code here checks only its own.
 
 ## Commands
 
 ```bash
+npm start            # the standalone host: DATABASE_URL, AGENT_ROUTER_PROVIDERS, SECURE_LOCAL_NET (README)
+npm run dev          # the same, restarting on a change
+npm run db:up        # a dev Postgres on 127.0.0.1:5441
 npm run check        # biome, tsc
 npm test             # vitest, on PGlite with the real migrations and the test host (tests/fake-host.ts)
 npm run db:generate  # the next migration after a table change; commit it
