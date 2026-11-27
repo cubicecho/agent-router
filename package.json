@@ -1,6 +1,6 @@
 {
   "name": "@cubicecho/agent-router",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "description": "ai-router's agent half as a server package: agents, revisions, runs, the agent loop and workers. A host mounts it.",
