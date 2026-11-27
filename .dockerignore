@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-worker
+*.tgz
+.git
+.github
+coverage
+.env
+.env.*
+*.local
+*.log
+.claude

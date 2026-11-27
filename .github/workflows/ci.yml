@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+  # A run by hand, for when GitHub drops the push event and main is left with no CI run for the release to wait on.
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 26, cache: npm }
+      - run: npm ci
+      - name: Lint
+        run: npx biome ci .
+      - name: Typecheck
+        run: npm run check:types
+      - name: Test
+        run: npm test
+      # drizzle-kit writes nothing when the tables and the migrations agree. It needs no database.
+      - name: Migrations match the tables
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            git status --porcelain drizzle
+            echo "::error::The tables changed without a migration. Run npm run db:generate and commit drizzle/."
+            exit 1
+          fi
+
+  # The worker package: it packs, installs on the oldest Node it names, and starts far enough to refuse a missing
+  # router address. The tarball is kept as the run's artifact.
+  worker-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 26, cache: npm }
+      - run: npm ci
+      - run: npm run pack:worker
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - name: It installs and starts on Node 22
+        run: |
+          npm install -g ./cubicecho-agent-router-worker-*.tgz
+          if agent-router-worker > worker.log 2>&1; then
+            cat worker.log
+            echo "::error::The worker started with no router address."
+            exit 1
+          fi
+          cat worker.log
+          grep -q 'AGENT_ROUTER_URL' worker.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-router-worker
+          path: cubicecho-agent-router-worker-*.tgz
+
+  # The image and the compose stack, until /healthz answers: the test for index.ts, the standalone config, waiting for
+  # Postgres, migrations against a real one, and the Dockerfile.
+  boot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      # Loaded into the local daemon under the tag docker-compose.yml runs, so `up --no-build` uses it.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ghcr.io/cubicecho/agent-router:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # --wait blocks until every service's healthcheck passes, the router's included.
+      - name: Start the stack
+        run: docker compose up -d --no-build --wait --wait-timeout 180
+      - name: /healthz answers
+        run: curl -fsS http://127.0.0.1:3100/healthz
+      # The worker program's image: it builds, and starts far enough to refuse a missing router address.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: worker
+          push: false
+          load: true
+          tags: agent-router-worker
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+      - name: The worker image starts
+        run: |
+          if docker run --rm agent-router-worker > worker.log 2>&1; then
+            cat worker.log
+            echo "::error::The worker started with no router address."
+            exit 1
+          fi
+          cat worker.log
+          grep -q 'AGENT_ROUTER_URL' worker.log
+      - name: Logs
+        if: failure()
+        run: docker compose logs

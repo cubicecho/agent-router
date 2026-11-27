@@ -1,0 +1,29 @@
+# The standalone host beside its own Postgres. `docker compose up`.
+name: agent-router
+services:
+  agent-router:
+    image: ${AGENT_ROUTER_IMAGE:-ghcr.io/cubicecho/agent-router:latest}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://agents:${POSTGRES_PASSWORD:-agents}@postgres:5432/agents
+      AGENT_ROUTER_PROVIDERS: ${AGENT_ROUTER_PROVIDERS:-}
+      AGENT_ROUTER_ADMIN_TOKEN: ${AGENT_ROUTER_ADMIN_TOKEN:-}
+      SECURE_LOCAL_NET: ${SECURE_LOCAL_NET:-false}
+    ports:
+      - "${PORT:-3100}:3100"
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: agents, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-agents}", POSTGRES_DB: agents }
+    # No `ports`. The database is for the router beside it.
+    volumes: [agent_router_pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agents -d agents"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  agent_router_pgdata:
