@@ -8,7 +8,15 @@
   "plugins": ["./no-negation.grit"],
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/dist", "!**/__generated__", "!**/drizzle", "!package-lock.json", "!**/*.md"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/dist-worker",
+      "!**/__generated__",
+      "!**/drizzle",
+      "!package-lock.json",
+      "!**/*.md"
+    ]
   },
   "formatter": {
     "enabled": true,

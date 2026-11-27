@@ -1,11 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { KEY_DEFAULTS } from '../core/defaults.ts';
+import { KEY_PREFIX, WORKER_KEY_PREFIX } from '../core/wire.ts';
 import type { Snapshot, SnapshotKey, SnapshotWorker } from '../db/snapshot.ts';
-
-/** What every workspace key starts with, so a leaked one is recognisable as the router's. */
-export const KEY_PREFIX = 'air_';
-/** What every worker key starts with, so no door for apps or people mistakes one for theirs. */
-export const WORKER_KEY_PREFIX = 'aiw_';
 
 /** A key as it is made: the secret, which is shown once, and what is stored about it. */
 export interface MintedKey {

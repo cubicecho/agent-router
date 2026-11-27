@@ -1,0 +1,16 @@
+{
+  // The worker package's declarations (`npm run build:worker`): what worker/lib.ts exports, and every file its types
+  // reach, under dist-worker/types/ at the same paths. The JavaScript is rolldown's.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "outDir": "dist-worker/types"
+  },
+  "include": [],
+  "files": ["worker/lib.ts"]
+}

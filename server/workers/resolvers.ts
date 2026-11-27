@@ -1,10 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { extendSchema, type GraphQLSchema, parse } from 'graphql';
 import { requireUser } from '../auth/caller.ts';
-import { mintKey, WORKER_KEY_PREFIX } from '../auth/keys.ts';
+import { mintKey } from '../auth/keys.ts';
 import type { AgentContext } from '../core/context.ts';
 import { badInput, conflict, notFound } from '../core/errors.ts';
 import { parseOrThrow } from '../core/validation.ts';
+import { WORKER_KEY_PREFIX } from '../core/wire.ts';
 import type { Transaction } from '../db/client.ts';
 import { LOCAL_WORKER_NAME, type WorkerRow, workers } from '../db/tables/workers.ts';
 import { workspaces } from '../db/tables/workspaces.ts';

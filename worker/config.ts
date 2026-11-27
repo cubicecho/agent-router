@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { WORKER_KEY_PREFIX } from '../server/auth/keys.ts';
 import { errorMessage } from '../server/core/errors.ts';
+import { WORKER_KEY_PREFIX } from '../server/core/wire.ts';
 
 /** Where the work root is when `WORKER_ROOT` is unset, under the worker user's home. */
 const DEFAULT_ROOT_FOLDER = 'agent-router-work';

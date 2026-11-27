@@ -6,5 +6,7 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"]
   },
-  "include": [".", "../vitest.config.ts"]
+  "include": [".", "../vitest.config.ts"],
+  // A consumer of the published worker package, checked against it in CI, not against these sources.
+  "exclude": ["worker-consumer"]
 }

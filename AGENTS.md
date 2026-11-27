@@ -30,7 +30,7 @@ The same folders as ai-router's `server/`, so the host can switch to this packag
 | `server/agent-router.ts` | the entry point a host calls, and what it exports | everything |
 | `server/standalone/` | the MVP's minimal host: env config, providers as the models port, the admin as people, Postgres, `/graphql` with operation limits, the Express app | everything here; nothing in the package imports it |
 | `server/index.ts` | boot for the standalone host (`npm start`) | `standalone`, `agent-router` |
-| `worker/` | the worker program, its local servers and the `workdir` server | `server/core`, `server/runner`, `server/auth/keys`, `server/tools` |
+| `worker/` | the worker program, its local servers and the `workdir` server | `server/core`, `server/runner`, `server/tools` |
 | `scripts/` | building the worker package | |
 | `drizzle/` | this package's migrations, committed | |
 

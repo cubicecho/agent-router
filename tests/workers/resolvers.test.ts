@@ -1,10 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readWorkerCaller } from '../../server/auth/caller.ts';
-import { hashKey, WORKER_KEY_PREFIX } from '../../server/auth/keys.ts';
+import { hashKey } from '../../server/auth/keys.ts';
 import { ADMIN_ROLES } from '../../server/core/admin-roles.ts';
 import { CALLER_RUN, CALLER_WORKER, type UserCaller } from '../../server/core/context.ts';
 import { ErrorCode } from '../../server/core/errors.ts';
+import { WORKER_KEY_PREFIX } from '../../server/core/wire.ts';
 import { runs } from '../../server/db/tables/runs.ts';
 import { LOCAL_WORKER_NAME, workers } from '../../server/db/tables/workers.ts';
 import { FakeHost } from '../fake-host.ts';

@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConflictingKeysError, readCaller, readWorkerCaller, readWorkspaceCaller } from '../../server/auth/caller.ts';
-import { findKey, findWorkerKey, hashKey, KEY_PREFIX, mintKey, WORKER_KEY_PREFIX } from '../../server/auth/keys.ts';
+import { findKey, findWorkerKey, hashKey, mintKey } from '../../server/auth/keys.ts';
 import { CALLER_USER, CALLER_WORKER, CALLER_WORKSPACE } from '../../server/core/context.ts';
+import { KEY_PREFIX, WORKER_KEY_PREFIX } from '../../server/core/wire.ts';
 import { workers, workspaces } from '../../server/db/schema.ts';
 import { loadSnapshot, type Snapshot } from '../../server/db/snapshot.ts';
 import { EMPTY_HOST_VIEW, type PeoplePort, Role, type SessionUser } from '../../server/ports.ts';

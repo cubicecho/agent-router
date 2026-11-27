@@ -19,6 +19,11 @@ export const HttpStatus = {
 } as const;
 export type HttpStatus = (typeof HttpStatus)[keyof typeof HttpStatus];
 
+/** What every workspace key starts with, so a leaked one is recognisable as the router's. */
+export const KEY_PREFIX = 'air_';
+/** What every worker key starts with, so no door for apps or people mistakes one for theirs. */
+export const WORKER_KEY_PREFIX = 'aiw_';
+
 /**
  * The address a run's endpoint points at when it uses the router's models. No server answers it: the run's model
  * `fetch` hands every call to the models area. `.invalid` is reserved, so a call that escaped would go nowhere.
