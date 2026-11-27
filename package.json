@@ -5,6 +5,10 @@
   "license": "MIT",
   "description": "ai-router's agent half as a server package: agents, revisions, runs, the agent loop and workers. A host mounts it.",
   "type": "module",
+  "exports": {
+    ".": "./server/agent-router.ts",
+    "./worker": "./worker/lib.ts"
+  },
   "engines": {
     "node": ">=26"
   },
