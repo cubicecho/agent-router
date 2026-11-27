@@ -102,9 +102,10 @@ export interface PeoplePort {
 }
 
 /**
- * Told when agent-router has deleted a row the host may hang rows of its own off, so the host cleans those up in
- * code: no foreign key crosses packages. Each is called after the delete's transaction commits, beside the snapshot
- * rebuild, and a failure is logged, never undoing the delete.
+ * Told when agent-router has deleted or copied a row the host may hang rows of its own off, so the host cleans up or
+ * copies those in code: no foreign key crosses packages. Each is called after the write's transaction commits, before
+ * the snapshot rebuild, and a failure is logged with `[agent-router]`, never undoing the write, which is answered as
+ * done.
  */
 export interface LifecyclePort {
   /**
@@ -126,6 +127,21 @@ export interface LifecyclePort {
    * @param workerId - The worker.
    */
   workerDeleted(workerId: string): Promise<void>;
+  /**
+   * A workspace was copied into a new one, with its agents, its worker and their switches: `copyWorkspace`. The host
+   * copies what it keyed by the workspace, such as its server entries (env, args, URL, roles, never secrets), so the
+   * new workspace's agents reach what the original's do. Called before the snapshot rebuild, so the rebuild sees them.
+   *
+   * @param fromWorkspaceId - The workspace copied.
+   * @param toWorkspaceId - The new one.
+   * @param workspaceAgentIds - Each of the original's workspace agent ids, to the new workspace's entry for the same
+   * agent.
+   */
+  workspaceCopied(
+    fromWorkspaceId: string,
+    toWorkspaceId: string,
+    workspaceAgentIds: ReadonlyMap<string, string>,
+  ): Promise<void>;
 }
 
 /** Everything a host hands agent-router. */

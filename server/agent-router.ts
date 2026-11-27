@@ -1,5 +1,6 @@
 import type { Runtime } from '@cubicecho/agent-core';
 import type { Router } from 'express';
+import type { GraphQLSchema } from 'graphql';
 import { createAgentMcpRoutes } from './agents/mcp.ts';
 import { createAgentRoutes } from './agents/routes.ts';
 import { createRunService, type RunService } from './agents/run.ts';
@@ -8,6 +9,7 @@ import { upgradeStored } from './agents/upgrade.ts';
 import type { RunSettings, WorkerSettings } from './core/defaults.ts';
 import type { DB } from './db/client.ts';
 import { createSnapshotHost, type SnapshotHost } from './db/snapshot.ts';
+import { buildAgentRouterSchema } from './graphql/build-schema.ts';
 import type { AgentRouterPorts } from './ports.ts';
 import { WORKERS_PATH } from './runner/protocol.ts';
 import { createWorkerRegistry } from './workers/registry.ts';
@@ -62,6 +64,11 @@ export interface AgentRouter {
   /** Agent runs, their bus and the remote workers. The host calls `recover`, `start` and `stop` around serving. */
   runs: RunService;
   routes: AgentRouterRoutes;
+  /**
+   * This package's complete GraphQL schema, permissions applied, for the host to serve or merge with the others'.
+   * Its resolvers read an `AgentContext` carrying this snapshot and run service.
+   */
+  schema: GraphQLSchema;
 }
 
 /**
@@ -102,6 +109,7 @@ export async function createAgentRouter({
   return {
     snapshot,
     runs,
+    schema: buildAgentRouterSchema({ db, ports }),
     routes: {
       v1: createAgentRoutes({ snapshot, runs, models: ports.models, overrides, now }),
       mcp: createAgentMcpRoutes({ db, snapshot, runs, models: ports.models, now }),
@@ -120,4 +128,10 @@ export async function upgradeStoredAgents(db: DB): Promise<void> {
   await upgradeStored(db);
 }
 
+export { ADMIN_ROLES, AdminRole } from './core/admin-roles.ts';
+export type { AgentContext } from './core/context.ts';
+export { AGENT_ROUTER_MIGRATIONS } from './db/client.ts';
+export { abilityFor, abilityForRoles, canReachField, FIELD_GRANTS } from './graphql/abilities.ts';
+export { type AgentRouterSchemaDeps, buildAgentRouterSchema } from './graphql/build-schema.ts';
+export * from './ports.ts';
 export { WORKERS_PATH };

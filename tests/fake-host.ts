@@ -131,6 +131,10 @@ export class FakeHost {
   script: (body: Record<string, unknown>) => Reply = () => ({ content: 'hello' });
   /** What the lifecycle port was told was deleted, in order. */
   readonly deleted: { kind: 'workspace' | 'agent' | 'worker'; id: string }[] = [];
+  /** What the lifecycle port was told was copied, in order. */
+  readonly copied: { from: string; to: string; workspaceAgentIds: ReadonlyMap<string, string> }[] = [];
+  /** When set, every lifecycle call records what it was told, then throws this. */
+  lifecycleFailure: Error | null = null;
   /** Session tokens the people port knows. */
   readonly sessions = new Map<string, SessionUser>();
   private readonly instances = new Map<string, Promise<Instance>>();
@@ -241,15 +245,35 @@ export class FakeHost {
         workspaceDeleted: async (id) => {
           this.deleted.push({ kind: 'workspace', id });
           this.workspaceServers.delete(id);
+          this.failIfAsked();
         },
         agentDeleted: async (id) => {
           this.deleted.push({ kind: 'agent', id });
+          this.failIfAsked();
         },
         workerDeleted: async (id) => {
           this.deleted.push({ kind: 'worker', id });
+          this.failIfAsked();
+        },
+        workspaceCopied: async (from, to, workspaceAgentIds) => {
+          this.copied.push({ from, to, workspaceAgentIds });
+          // As ai-router copies its server entries: the new workspace has the same servers.
+          this.workspaceServers.set(to, [...(this.workspaceServers.get(from) ?? [])]);
+          this.failIfAsked();
         },
       },
     };
+  }
+
+  /**
+   * Throws the lifecycle failure a test set.
+   *
+   * @throws {@link FakeHost.lifecycleFailure} when set.
+   */
+  private failIfAsked(): void {
+    if (this.lifecycleFailure !== null) {
+      throw this.lifecycleFailure;
+    }
   }
 
   /** Closes every server's instance. */

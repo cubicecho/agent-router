@@ -1,6 +1,16 @@
+import { createRequire } from 'node:module';
 import { defineConfig } from 'vitest/config';
 
+const resolve = createRequire(import.meta.url).resolve;
+
 export default defineConfig({
+  resolve: {
+    alias: [
+      // graphql ships no exports map: Vite follows `module` to index.mjs while Node follows `main` to index.js, and the
+      // two copies fail each other's instanceof checks.
+      { find: /^graphql$/, replacement: resolve('graphql') },
+    ],
+  },
   test: {
     globals: true,
     exclude: ['**/node_modules/**', '**/dist/**', '**/dist-worker/**'],

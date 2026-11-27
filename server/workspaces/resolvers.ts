@@ -1,0 +1,378 @@
+import { and, eq, inArray } from 'drizzle-orm';
+import { extendSchema, type GraphQLSchema, parse } from 'graphql';
+import { requireUser } from '../auth/caller.ts';
+import { mintKey } from '../auth/keys.ts';
+import type { AgentContext } from '../core/context.ts';
+import { badInput, notFound } from '../core/errors.ts';
+import { parseOrThrow } from '../core/validation.ts';
+import { MS_PER_DAY } from '../core/wire.ts';
+import type { Transaction } from '../db/client.ts';
+import { LOCAL_WORKER_NAME, workers } from '../db/tables/workers.ts';
+import { workspaceAgentDisabledServers } from '../db/tables/workspace-agent-disabled-servers.ts';
+import { workspaceAgentDisabledTools } from '../db/tables/workspace-agent-disabled-tools.ts';
+import { workspaceAgents } from '../db/tables/workspace-agents.ts';
+import { workspaceKeys } from '../db/tables/workspace-keys.ts';
+import { workspaces } from '../db/tables/workspaces.ts';
+import { objectType } from '../graphql/object-type.ts';
+import { tellHost } from '../graphql/write-guards.ts';
+import type { AgentRouterPorts, HostView } from '../ports.ts';
+import { keyInput, toolNameInput, workspaceInput } from './input.ts';
+
+const WORKSPACES_SDL = parse(`
+  "A workspace key as it is made. The secret is in this answer and nowhere else, so show it to the person now."
+  type CreatedWorkspaceKey {
+    key: WorkspaceKey!
+    "The whole key, for the app to send as \`Authorization: Bearer\` or \`x-api-key\`."
+    secret: String!
+  }
+
+  extend type Mutation {
+    "Makes a key for one of a workspace's apps. It works from the moment this answers."
+    createWorkspaceKey(
+      workspaceId: UUID!
+      "What the app is, for people: phone, desktop."
+      name: String!
+      "Days until it stops working. Leave it out for a key that never expires."
+      expiresInDays: Int
+    ): CreatedWorkspaceKey!
+    "Revokes a key. An app using it is refused from the next request. True when there was such a key."
+    revokeWorkspaceKey(id: UUID!): Boolean!
+    """
+    Turns one of a workspace's servers on or off for one agent there. Every agent reaches every server of its
+    workspace unless it is turned off for it. Takes effect from the next request, and answers whether it is on.
+    """
+    setWorkspaceAgentServerEnabled(
+      "The workspace's entry for the agent."
+      workspaceAgentId: UUID!
+      "A server the workspace has."
+      serverId: UUID!
+      enabled: Boolean!
+    ): Boolean!
+    """
+    Turns one tool of a workspace's server on or off for one agent there. Every tool of a server that is on is reached
+    unless it is turned off for the agent, so a tool the server adds later is on. A server turned off turns off all its
+    tools, and these choices come back when it is turned on. Takes effect from the next request, and answers whether
+    the tool is on.
+    """
+    setWorkspaceAgentToolEnabled(
+      "The workspace's entry for the agent."
+      workspaceAgentId: UUID!
+      "A server the workspace has."
+      serverId: UUID!
+      "The tool's own name on its server, before any \`<server>__\`."
+      tool: String!
+      enabled: Boolean!
+    ): Boolean!
+    """
+    Makes a workspace that starts like another: the same agents, the same worker, and the same servers and tools
+    turned off for each agent. The host copies what it keeps for the workspace, such as its servers' entries, so its
+    runs reach what the other's do. It never copies keys or secrets: the new workspace has no key until one is made.
+    """
+    copyWorkspace(
+      "The workspace to start from."
+      fromWorkspaceId: UUID!
+      slug: String!
+      name: String!
+      description: String
+    ): Workspace!
+    """
+    Sets the worker a workspace's agent loops run on, from its next run. Null, or the local worker, runs them inside
+    the router.
+    """
+    setWorkspaceWorker(workspaceId: UUID!, workerId: UUID): Workspace!
+  }
+`);
+
+/** What `copyWorkspace` is given. */
+interface CopyWorkspaceArgs {
+  fromWorkspaceId: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+}
+
+/** What a new workspace states: all of its columns but the description are required. */
+const newWorkspaceInput = workspaceInput.required({ slug: true, name: true });
+
+/** What `setWorkspaceAgentServerEnabled` is given. */
+interface SetAgentServerEnabledArgs {
+  workspaceAgentId: string;
+  serverId: string;
+  enabled: boolean;
+}
+
+/** What `setWorkspaceAgentToolEnabled` is given. */
+interface SetAgentToolEnabledArgs extends SetAgentServerEnabledArgs {
+  tool: string;
+}
+
+/** What `setWorkspaceWorker` is given. */
+interface SetWorkspaceWorkerArgs {
+  workspaceId: string;
+  workerId?: string | null;
+}
+
+/** What `createWorkspaceKey` is given. */
+interface CreateKeyArgs {
+  workspaceId: string;
+  name: string;
+  expiresInDays?: number | null;
+}
+
+/**
+ * Refuses a switch for an agent and a server unless the agent's workspace runs it and has the server. Which servers a
+ * workspace has is the host's, read from its view, not from the snapshot, which may be a write behind.
+ *
+ * @param tx - The switch's transaction.
+ * @param workspaceServers - The host's view of each workspace's servers, read before the transaction, since the
+ * host's reads go through its own connections.
+ * @param workspaceAgentId - The workspace's entry for the agent.
+ * @param serverId - The server.
+ * @throws When the workspace doesn't run the agent or doesn't have the server: NOT_FOUND.
+ */
+async function requireAgentAndServer(
+  tx: Transaction,
+  workspaceServers: HostView['workspaceServers'],
+  workspaceAgentId: string,
+  serverId: string,
+): Promise<void> {
+  const [entry] = await tx
+    .select({ workspaceId: workspaceAgents.workspaceId })
+    .from(workspaceAgents)
+    .where(eq(workspaceAgents.id, workspaceAgentId));
+  const serverIds = entry === undefined ? [] : (workspaceServers.get(entry.workspaceId) ?? []);
+  if (serverIds.includes(serverId) === false) {
+    throw notFound('That workspace does not run that agent, or does not have that server.');
+  }
+}
+
+/**
+ * Reads the worker a workspace is set to run on, as `workspaces.worker_id` stores it.
+ *
+ * @param tx - The change's transaction.
+ * @param workerId - The worker asked for, or null for `local`.
+ * @returns The worker's id, or null for `local`, which is stored as none.
+ * @throws NOT_FOUND for a worker that doesn't exist.
+ */
+async function storedWorkerId(tx: Transaction, workerId: string | null): Promise<string | null> {
+  if (workerId === null) {
+    return null;
+  }
+  const [worker] = await tx.select({ name: workers.name }).from(workers).where(eq(workers.id, workerId));
+  if (worker === undefined) {
+    throw notFound('Worker not found.');
+  }
+  return worker.name === LOCAL_WORKER_NAME ? null : workerId;
+}
+
+/**
+ * Adds the workspace fields CRUD can't express: making and revoking keys, turning a workspace's servers, or single
+ * tools of them, off for one of its agents, copying a workspace into a new one, and setting its worker. A workspace's
+ * servers are the host's: these fields read them from its view, and never add or remove one.
+ *
+ * @param schema - Schema to extend.
+ * @param ports - The host's view, which says which servers a workspace has, and its lifecycle port, told of a copy.
+ * @returns The extended schema.
+ */
+export function applyWorkspacesExtension(
+  schema: GraphQLSchema,
+  { readHostView, lifecycle }: Pick<AgentRouterPorts, 'readHostView' | 'lifecycle'>,
+): GraphQLSchema {
+  const extended = extendSchema(schema, WORKSPACES_SDL);
+  const mutations = objectType(extended, 'Mutation').getFields();
+
+  mutations.createWorkspaceKey.resolve = async (_parent: unknown, args: CreateKeyArgs, ctx: AgentContext) => {
+    const { userId } = requireUser(ctx.caller);
+    const { name, expiresInDays } = parseOrThrow(keyInput, args);
+    const [workspace] = await ctx.db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.id, args.workspaceId));
+    if (workspace === undefined) {
+      throw notFound('Workspace not found.');
+    }
+    const { secret, hash, start } = mintKey();
+    const expiresAt = expiresInDays == null ? null : new Date(Date.now() + expiresInDays * MS_PER_DAY);
+    const [key] = await ctx.db
+      .insert(workspaceKeys)
+      .values({ workspaceId: workspace.id, name, start, hash, createdBy: userId, expiresAt })
+      .returning();
+    // Before answering, so the app can use the key at once.
+    await ctx.snapshot.rebuild();
+    return { key, secret };
+  };
+
+  mutations.revokeWorkspaceKey.resolve = async (_parent: unknown, args: { id: string }, ctx: AgentContext) => {
+    requireUser(ctx.caller);
+    const deleted = await ctx.db
+      .delete(workspaceKeys)
+      .where(eq(workspaceKeys.id, args.id))
+      .returning({ id: workspaceKeys.id });
+    await ctx.snapshot.rebuild();
+    return deleted.length > 0;
+  };
+
+  mutations.setWorkspaceAgentServerEnabled.resolve = async (
+    _parent: unknown,
+    args: SetAgentServerEnabledArgs,
+    ctx: AgentContext,
+  ) => {
+    requireUser(ctx.caller);
+    const { workspaceAgentId, serverId, enabled } = args;
+    const { workspaceServers } = await readHostView();
+    await ctx.db.transaction(async (tx) => {
+      await requireAgentAndServer(tx, workspaceServers, workspaceAgentId, serverId);
+      const isOff = and(
+        eq(workspaceAgentDisabledServers.workspaceAgentId, workspaceAgentId),
+        eq(workspaceAgentDisabledServers.serverId, serverId),
+      );
+      if (enabled) {
+        await tx.delete(workspaceAgentDisabledServers).where(isOff);
+      } else {
+        await tx.insert(workspaceAgentDisabledServers).values({ workspaceAgentId, serverId }).onConflictDoNothing();
+      }
+    });
+    // Before answering, so the next request reaches what was set.
+    await ctx.snapshot.rebuild();
+    return enabled;
+  };
+
+  mutations.setWorkspaceAgentToolEnabled.resolve = async (
+    _parent: unknown,
+    args: SetAgentToolEnabledArgs,
+    ctx: AgentContext,
+  ) => {
+    requireUser(ctx.caller);
+    const { workspaceAgentId, serverId, enabled } = args;
+    const { tool } = parseOrThrow(toolNameInput, args);
+    const { workspaceServers } = await readHostView();
+    await ctx.db.transaction(async (tx) => {
+      await requireAgentAndServer(tx, workspaceServers, workspaceAgentId, serverId);
+      const isOff = and(
+        eq(workspaceAgentDisabledTools.workspaceAgentId, workspaceAgentId),
+        eq(workspaceAgentDisabledTools.serverId, serverId),
+        eq(workspaceAgentDisabledTools.tool, tool),
+      );
+      if (enabled) {
+        await tx.delete(workspaceAgentDisabledTools).where(isOff);
+      } else {
+        await tx.insert(workspaceAgentDisabledTools).values({ workspaceAgentId, serverId, tool }).onConflictDoNothing();
+      }
+    });
+    // Before answering, so the next request reaches what was set.
+    await ctx.snapshot.rebuild();
+    return enabled;
+  };
+
+  mutations.copyWorkspace.resolve = async (_parent: unknown, args: CopyWorkspaceArgs, ctx: AgentContext) => {
+    requireUser(ctx.caller);
+    const values = parseOrThrow(newWorkspaceInput, { ...args, description: args.description ?? '' });
+    const copy = await ctx.db.transaction(async (tx) => {
+      const [source] = await tx
+        .select({ id: workspaces.id, workerId: workspaces.workerId })
+        .from(workspaces)
+        .where(eq(workspaces.id, args.fromWorkspaceId));
+      if (source === undefined) {
+        throw notFound('The workspace to copy from was not found.');
+      }
+      const [taken] = await tx.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.slug, values.slug));
+      if (taken !== undefined) {
+        throw badInput('A workspace with that slug already exists.');
+      }
+      // The worker is placement, not a secret: the copy's runs go where the original's do.
+      const [created] = await tx
+        .insert(workspaces)
+        .values({ ...values, workerId: source.workerId })
+        .returning();
+      if (created === undefined) {
+        throw new Error('The workspace insert returned no row.');
+      }
+      const entries = await tx
+        .select({ id: workspaceAgents.id, agentId: workspaceAgents.agentId })
+        .from(workspaceAgents)
+        .where(eq(workspaceAgents.workspaceId, source.id));
+      const copiedEntries =
+        entries.length === 0
+          ? []
+          : await tx
+              .insert(workspaceAgents)
+              .values(entries.map(({ agentId }) => ({ workspaceId: created.id, agentId })))
+              .returning({ id: workspaceAgents.id, agentId: workspaceAgents.agentId });
+      const newEntryIdByAgent = new Map(copiedEntries.map((entry) => [entry.agentId, entry.id]));
+      const agentIdByOldEntry = new Map(entries.map((entry) => [entry.id, entry.agentId]));
+      // The new workspace's entry for the agent the source's entry is for.
+      const newEntryIdOf = (oldEntryId: string): string => {
+        const newId = newEntryIdByAgent.get(agentIdByOldEntry.get(oldEntryId) ?? '');
+        if (newId === undefined) {
+          throw new Error('A copied workspace agent has no new entry.');
+        }
+        return newId;
+      };
+
+      const oldEntryIds = entries.map((entry) => entry.id);
+      if (oldEntryIds.length > 0) {
+        const disabledServers = await tx
+          .select({
+            workspaceAgentId: workspaceAgentDisabledServers.workspaceAgentId,
+            serverId: workspaceAgentDisabledServers.serverId,
+          })
+          .from(workspaceAgentDisabledServers)
+          .where(inArray(workspaceAgentDisabledServers.workspaceAgentId, oldEntryIds));
+        if (disabledServers.length > 0) {
+          await tx.insert(workspaceAgentDisabledServers).values(
+            disabledServers.map((row) => ({
+              workspaceAgentId: newEntryIdOf(row.workspaceAgentId),
+              serverId: row.serverId,
+            })),
+          );
+        }
+        const disabledTools = await tx
+          .select({
+            workspaceAgentId: workspaceAgentDisabledTools.workspaceAgentId,
+            serverId: workspaceAgentDisabledTools.serverId,
+            tool: workspaceAgentDisabledTools.tool,
+          })
+          .from(workspaceAgentDisabledTools)
+          .where(inArray(workspaceAgentDisabledTools.workspaceAgentId, oldEntryIds));
+        if (disabledTools.length > 0) {
+          await tx.insert(workspaceAgentDisabledTools).values(
+            disabledTools.map((row) => ({
+              workspaceAgentId: newEntryIdOf(row.workspaceAgentId),
+              serverId: row.serverId,
+              tool: row.tool,
+            })),
+          );
+        }
+      }
+      return { created, workspaceAgentIds: new Map(entries.map((entry) => [entry.id, newEntryIdOf(entry.id)])) };
+    });
+    // The host copies its own rows first, so the rebuild sees the new workspace's servers.
+    await tellHost('workspaceCopied', () =>
+      lifecycle.workspaceCopied(args.fromWorkspaceId, copy.created.id, copy.workspaceAgentIds),
+    );
+    // Before answering, so the new workspace's agents reach their servers at once.
+    await ctx.snapshot.rebuild();
+    return copy.created;
+  };
+
+  mutations.setWorkspaceWorker.resolve = async (_parent: unknown, args: SetWorkspaceWorkerArgs, ctx: AgentContext) => {
+    requireUser(ctx.caller);
+    const workspace = await ctx.db.transaction(async (tx) => {
+      const workerId = await storedWorkerId(tx, args.workerId ?? null);
+      const [updated] = await tx
+        .update(workspaces)
+        .set({ workerId })
+        .where(eq(workspaces.id, args.workspaceId))
+        .returning();
+      if (updated === undefined) {
+        throw notFound('Workspace not found.');
+      }
+      return updated;
+    });
+    // Before answering, so the workspace's next run goes to the worker set.
+    await ctx.snapshot.rebuild();
+    return workspace;
+  };
+
+  return extended;
+}

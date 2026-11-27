@@ -60,8 +60,8 @@ export interface WorkerCaller {
 }
 
 /**
- * What this package's GraphQL resolvers (step 4) read from a request's context. A host's own context carries this
- * and more, so it is one as it is.
+ * What this package's GraphQL resolvers read from a request's context. A host's own context carries this and more, so
+ * it is one as it is.
  */
 export interface AgentContext {
   db: DB;
@@ -71,4 +71,6 @@ export interface AgentContext {
   runs: RunService;
   /** null for nobody, which permissions refuse. */
   caller: Caller | null;
+  /** The HTTP request, as Yoga's context carries it: a run's live events stop following when it is aborted. */
+  request?: Request;
 }

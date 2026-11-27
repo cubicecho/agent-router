@@ -181,3 +181,41 @@ export const CONVERSATION_DEFAULTS: Readonly<ConversationSettings> = Object.free
   idleHours: 72,
   maxIdLength: 255,
 });
+
+/**
+ * The page sizes of this package's generated GraphQL lists. Depth, alias and cost limits are the host's handler's,
+ * since they apply to the merged schema.
+ */
+export interface OperationLimitSettings {
+  /** Rows a list returns when the request names no `limit`. */
+  defaultPageSize: number;
+  /** The largest `limit` a request may ask for. Larger is refused, not trimmed. */
+  maxPageSize: number;
+}
+
+export const OPERATION_LIMIT_DEFAULTS: Readonly<OperationLimitSettings> = Object.freeze({
+  defaultPageSize: 50,
+  maxPageSize: 500,
+});
+
+/** Workspaces and their keys, as people write them. */
+export interface WorkspaceSettings {
+  /** Longest name, in characters. */
+  maxNameLength: number;
+  /** Longest description, in characters. */
+  maxDescriptionLength: number;
+  /** Longest key name, in characters. */
+  maxKeyNameLength: number;
+  /** Longest key lifetime a person may choose, in days. */
+  maxKeyExpiryDays: number;
+  /** Longest tool name that may be turned off for an agent, in characters: MCP asks for at most 128. */
+  maxToolNameLength: number;
+}
+
+export const WORKSPACE_DEFAULTS: Readonly<WorkspaceSettings> = Object.freeze({
+  maxNameLength: 120,
+  maxDescriptionLength: 2_000,
+  maxKeyNameLength: 120,
+  maxKeyExpiryDays: 3_650,
+  maxToolNameLength: 128,
+});
