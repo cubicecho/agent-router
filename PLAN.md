@@ -9,9 +9,9 @@ ai-router stays the whole combination for now: this is a copy, and ai-router kee
 depending on this package. Later, llm-router and mcp-router can become packages of the same shape, and ai-router a
 thin host that merges their finished schemas.
 
-Status (2026-11-25): **steps 1 to 3 are built.** The runner, the worker program, the tables and their migration, the
-snapshot slice, `agents/` and `workers/` behind the ports, and the entry point, with their tests on a test host. Next
-is step 4, the GraphQL schema.
+Status (2026-11-27): **steps 1 to 4 are built.** The runner, the worker program, the tables and their migration, the
+snapshot slice, `agents/`, `workers/` and `workspaces/` behind the ports, the entry point, and the package's own
+GraphQL schema with its permissions, with their tests on a test host. Next is step 5, in ai-router.
 
 ## What moved here
 
@@ -19,9 +19,11 @@ The folders keep ai-router's names, so a host can switch to this package file fo
 
 | From ai-router | Here | Notes |
 | --- | --- | --- |
-| `server/agents/` | `server/agents/` | all but `resolvers.ts`, `run-resolvers.ts` and `hooks.ts`, which are GraphQL (step 4) |
+| `server/agents/` | `server/agents/` | all of it |
 | `server/runner/` | `server/runner/` | as it was |
-| `server/workers/` | `server/workers/` | all but `resolvers.ts` (step 4) |
+| `server/workers/` | `server/workers/` | all of it |
+| `server/workspaces/` | `server/workspaces/` | its keys, worker, copy and switches; a workspace's server entries stay with tools |
+| the parts of `server/graphql/` these use | `server/graphql/` | building this package's schema, its abilities and permissions, write guards, database errors |
 | `worker/`, `scripts/worker-package.ts` | `worker/`, `scripts/` | the worker program and its package |
 | the agent tables | `server/db/tables/` | `agents`, `agent_revisions`, `runs`, `run_events`, `conversations`, `workers`, `workspaces`, `workspace_agents`, `workspace_keys` and the two per-agent switch tables |
 | `server/auth/caller.ts`, `keys.ts` | `server/auth/` | keys and callers; a person's session through the people port |
@@ -46,14 +48,23 @@ All of them are in `server/ports.ts`, as `AgentRouterPorts`.
   (elicitation) and progress ride on the call's `RunToolCall`.
 - **`readHostView`:** the host's providers, pools and servers by name, each workspace's server ids, and the router's
   settings. The snapshot reads it on every rebuild, so the host rebuilds after its own writes that change it.
-- **`people`:** who a request's session is, for the GraphQL caller (step 4). Workspace and worker keys are checked
-  here, against this package's own snapshot.
-- **`lifecycle`:** told after a delete commits that a workspace, an agent or a worker is gone, so the host cleans up
-  its own rows in code. Nothing in step 3 deletes one: step 4's mutations call it.
+- **`people`:** who a request's session is, for the host's GraphQL caller (`readCaller`). Workspace and worker keys
+  are checked here, against this package's own snapshot.
+- **`lifecycle`:** told after a write commits, before the snapshot rebuild, so the host cleans up or copies its own
+  rows in code. `workspaceDeleted`, `agentDeleted` and `workerDeleted` follow `deleteWorkspace`, `deleteAgent` and
+  `deleteWorker`. `workspaceCopied(fromId, toId, workspaceAgentIds)` follows `copyWorkspace`, which copies only this
+  package's rows, so the host copies its server entries; `workspaceAgentIds` maps each of the original's workspace
+  agents to the copy's. A failure is logged with `[agent-router]` and the mutation still answers done: its rows are
+  already written.
 
 The entry point is `createAgentRouter({ db, ports, overrides?, workerOverrides?, runtime?, now?, snapshot?, workers? })`
-in `server/agent-router.ts`. It returns the snapshot host, the run service, and the routers for `/v1`, `/mcp`,
-`/runs` and `/workers`. A host applies `AGENT_ROUTER_MIGRATIONS` and calls `upgradeStoredAgents(db)` before it.
+in `server/agent-router.ts`. It returns the snapshot host, the run service, the routers for `/v1`, `/mcp`, `/runs`
+and `/workers`, and `schema`. A host applies `AGENT_ROUTER_MIGRATIONS` and calls `upgradeStoredAgents(db)` before it.
+
+The same file exports `buildAgentRouterSchema({ db, ports })` (the schema alone, from the database, `readHostView`
+and `lifecycle`), the `AgentContext` type its resolvers read, and this package's admin roles and abilities
+(`ADMIN_ROLES`, `FIELD_GRANTS`, `abilityFor`, `abilityForRoles`, `canReachField`) for the host's admin server to
+union with the other packages'.
 
 ## GraphQL: one schema per package, merged by the host
 
@@ -63,9 +74,16 @@ hand-written fields, and its casl permissions. A host merges the finished schema
 - This package's schema covers agents, revisions, runs, conversations, workers, workspaces, their agents, keys and
   per-agent switches.
 - Its resolvers read what they need from `AgentContext` (`server/core/context.ts`): the database, the snapshot host,
-  the run service and the caller. A host's context carries this and more.
-- **Fields across packages go away** in the merged schema: `Workspace.serversAggregate`, a revision's or key's
-  `creator`, and filters through a workspace's servers. The host's UI queries are rewritten for that later.
+  the run service, the caller, and the request, whose abort stops a subscription. A host's context carries this and
+  more.
+- **Its permissions travel with it.** They are applied inside `buildAgentRouterSchema`, so a host that stitches the
+  schema keeps them (`tests/graphql/merged.test.ts`). Nothing here is admin-only; people-only mutations are listed in
+  `server/graphql/permissions.ts`, and a run reaches only `FIELD_GRANTS` by its roles, reading only this package's.
+- **Fields across packages go away** in the merged schema: `Workspace.serversAggregate`, a revision's, key's or
+  worker's `creator` (`createdBy` stays, as a plain id), and filters through a workspace's servers. The host adds them
+  back in its links layer (ai-router#75), and its UI queries are rewritten until then.
+- **What the host's handler keeps:** Yoga, the operation's depth, alias and cost limits, and the SSE transport of the
+  subscription. This package caps only its list sizes (`OPERATION_LIMIT_DEFAULTS`).
 
 ## Decisions (2026-11-25)
 
@@ -92,8 +110,17 @@ hand-written fields, and its casl permissions. A host merges the finished schema
 2. `runner/` and `worker/`, which move almost as they are. **Done.**
 3. The tables and their migration, the snapshot slice, then `agents/` and `workers/` behind the ports, with their tests
    on a test host. **Done.**
-4. The package's own GraphQL schema: `agents/resolvers.ts`, `run-resolvers.ts`, `workers/resolvers.ts`, the write
-   guards and hooks, casl permissions, and the deletes that call `lifecycle`. A small host in the tests merges it with
-   a stand-in.
+4. The package's own GraphQL schema: `agents/resolvers.ts`, `run-resolvers.ts`, `workers/resolvers.ts`,
+   `workspaces/`, the write guards and hooks, casl permissions, and the deletes and the copy that call `lifecycle`. A
+   small host in the tests stitches it with a stand-in. **Done.**
 5. Later, in ai-router: depend on this package, delete the copies, implement the ports over its own areas, and compare
    the merged schema with today's.
+
+## Left over from step 4
+
+- **`cancelRun` without a reason says "Cancelled by a person."** It named the person in ai-router, from the users
+  table, which is the host's. A `people` lookup of a name would bring it back, if it is missed.
+- **Elicitation, the admin server, agents calling agents and workspace instances keep their tests in ai-router**, as
+  in step 3: they need its tools area.
+- **drizzle-graphql warns at build** that `workspaceKeys.hash` is excluded and required. Its inserts are reserved, so
+  no generated insert exists; ai-router's build says the same.

@@ -23,9 +23,11 @@ The same folders as ai-router's `server/`, so the host can switch to this packag
 | `server/auth/` | workspace and worker keys, and reading callers | `core`, `db`, `ports` |
 | `server/models/`, `server/tools/` | the small helpers agents use from the host's areas: model and tool naming, OpenAI errors, tool results, the narrowed `ToolServices` | `core` |
 | `server/runner/` | the agent loop of one stretch of a run, from a JSON assignment, through its ports | `core` (a test keeps it so) |
-| `server/workers/` | where a run's loop executes: `local` in process, and remote workers' registry, runs and doors | `core`, `db`, `auth`, `runner`, `models`, `agents/routes` (for express's body error words) |
-| `server/agents/` | revisions, layers, reach, runs, conversations, `/v1`, `/runs`, `/mcp` | all of the above |
-| `server/agent-router.ts` | the entry point a host calls | everything |
+| `server/workers/` | where a run's loop executes: `local` in process, remote workers' registry, runs and doors, and workers' GraphQL fields | `core`, `db`, `auth`, `runner`, `models`, `agents/routes` (for express's body error words), `graphql/object-type`, `graphql/selected-id`, `graphql/write-guards` |
+| `server/agents/` | revisions, layers, reach, runs, conversations, `/v1`, `/runs`, `/mcp`, and their GraphQL fields | all of the above, and `graphql/object-type`, `graphql/selected-id`, `graphql/write-guards` |
+| `server/workspaces/` | workspaces' keys, worker, copy and per-agent switches, as GraphQL fields | all of the above |
+| `server/graphql/` | this package's schema: building it, its abilities and permissions, write guards, database errors | everything here |
+| `server/agent-router.ts` | the entry point a host calls, and what it exports | everything |
 | `worker/` | the worker program, its local servers and the `workdir` server | `server/core`, `server/runner`, `server/auth/keys`, `server/tools` |
 | `scripts/` | building the worker package | |
 | `drizzle/` | this package's migrations, committed | |
@@ -35,7 +37,13 @@ The same folders as ai-router's `server/`, so the host can switch to this packag
 ai-router's `AGENTS.md` holds the invariants this code keeps. These are the ones the split adds.
 
 - **No foreign key to a host table.** A column naming a host row (`created_by`, a switch's `server_id`) is a plain
-  column. Deleting a workspace, an agent or a worker tells the host through `ports.lifecycle`, after the commit.
+  column. Deleting a workspace, an agent or a worker, and copying a workspace, tell the host through
+  `ports.lifecycle`, after the commit and before the snapshot rebuild, through `tellHost`
+  (`graphql/write-guards.ts`), which logs a failure and never fails the mutation.
+- **The schema holds no field of the host's.** No relation to a host table, no `creator`, no workspace servers: the
+  host adds those when it merges. A workspace's servers are read from `readHostView()`, before a transaction.
+- **Permissions are applied inside `buildAgentRouterSchema`,** so they hold when a host stitches the schema. A new
+  mutation is shut until `graphql/permissions.ts` names it, and a run reaches only what `FIELD_GRANTS` lists.
 - **Everything the host owns comes through `server/ports.ts`.** The snapshot takes the host's view on every rebuild;
   never read a host table.
 - **Admin roles are this package's own** (`server/core/admin-roles.ts`). A run's caller carries every package's roles,
@@ -45,7 +53,7 @@ ai-router's `AGENTS.md` holds the invariants this code keeps. These are the ones
 
 ```bash
 npm run check        # biome, tsc
-npm test             # vitest, on PGlite with the real migrations
+npm test             # vitest, on PGlite with the real migrations and the test host (tests/fake-host.ts)
 npm run db:generate  # the next migration after a table change; commit it
 npm run worker       # the worker program, from this checkout
 npm run pack:worker  # the worker package's tarball
