@@ -72,7 +72,7 @@ jobs:
           npm install --no-audit --no-fund ./cubicecho-agent-router-worker-*.tgz "typescript@$TYPESCRIPT" @types/node@22
           npx tsc -p tsconfig.json
           node consumer.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agent-router-worker
           path: cubicecho-agent-router-worker-*.tgz
